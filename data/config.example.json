@@ -1,0 +1,31 @@
+{
+  "wifi": {
+    "ssid": "YOUR_WIFI_SSID",
+    "password": "YOUR_WIFI_PASSWORD"
+  },
+  "system": {
+    "device_name": "ESP32 Aqua Monitor",
+    "serial_baud": 115200,
+    "sensor_read_interval": 5000,
+    "print_interval": 30000,
+    "use_icons": false,
+    "use_emoji": false,
+    "ascii_only": true
+  },
+  "sensors": {
+    "temperature_count": 8,
+    "ph_count": 8,
+    "tds_count": 8
+  },
+  "hardware": {
+    "led_pin": 2,
+    "temp_adc_pin": 32,
+    "ph_adc_pin": 33,
+    "tds_adc_pin": 35,
+    "mux_s0": 4,
+    "mux_s1": 5,
+    "mux_s2": 18,
+    "mux_s3": 19,
+    "mux_enable": 21
+  }
+}
