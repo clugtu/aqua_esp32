@@ -3,6 +3,10 @@
 <head>
     <title>ESP32 Aqua Monitor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
     <style>
         body { 
             font-family: Arial; 
@@ -144,6 +148,7 @@
         <div><strong>System Status:</strong> <span id="systemStatus">Online</span></div>
         <div><strong>WiFi:</strong> <span id="wifiStatus">{{WIFI_SSID}}</span></div>
         <div><strong>IP:</strong> <span id="ipAddress">{{IP_ADDRESS}}</span></div>
+        <div><strong>Security:</strong> <span id="securityStatus">Checking...</span></div>
         <div><strong>Uptime:</strong> <span id="uptime">{{UPTIME}}</span></div>
     </div>
 
@@ -239,9 +244,23 @@
             return card;
         }
         
+        function updateSecurityStatus() {
+            const isSecure = window.location.protocol === 'https:';
+            const securityElement = document.getElementById('securityStatus');
+            
+            if (isSecure) {
+                securityElement.textContent = 'Secure (HTTPS via Proxy)';
+                securityElement.style.color = '#28a745';
+            } else {
+                securityElement.textContent = 'HTTP + Security Headers';
+                securityElement.style.color = '#17a2b8';
+            }
+        }
+        
         function startAutoRefresh() {
             // Initial load
             loadAquariums();
+            updateSecurityStatus();
             
             // Auto-refresh every 5 seconds
             updateInterval = setInterval(loadAquariums, 5000);

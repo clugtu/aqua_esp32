@@ -1,6 +1,7 @@
 #pragma once
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include <WiFiClientSecure.h>
 #include "SensorController.h"
 #include "CalibrationManager.h"
 #include "ConfigManager.h"
@@ -14,6 +15,11 @@ private:
   CalibrationManager* calibrationManager;
   ConfigManager* configManager;
   TemplateManager* templateManager;
+  
+  // Security configuration
+  bool enableHTTPS;
+  bool requireSecureConnection;
+  bool sslInitialized;
   
   void setupRoutes();
   void handleRoot(AsyncWebServerRequest *request);
@@ -36,6 +42,14 @@ private:
   void handleConfigPage(AsyncWebServerRequest *request);
   void handleApiConfig(AsyncWebServerRequest *request);
   void handleApiConfigSave(AsyncWebServerRequest *request);
+  // Security methods
+  void addSecurityHeaders(AsyncWebServerRequest *request);
+  AsyncWebServerResponse* createSecureResponse(AsyncWebServerRequest *request, int code, const String& contentType, const String& content);
+  void handleSecurityRedirect(AsyncWebServerRequest *request);
+  bool isSecureConnection(AsyncWebServerRequest *request);
+  bool initSSL();  // Information only - not functional
+  void setupHTTPSRoutes();  // Information only - not functional
+  
   // Template rendering methods
   String renderDashboard();
   String renderAdminLogin();

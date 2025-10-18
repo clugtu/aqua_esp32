@@ -43,9 +43,15 @@
 #define SERIAL_BAUD_RATE  115200
 #define SENSOR_READ_DELAY 5000
 #define WEB_SERVER_PORT   80
+#define HTTPS_SERVER_PORT 443
 
 // Default web server configuration
 #define DEFAULT_WEB_SERVER_PORT   80
+#define DEFAULT_HTTPS_SERVER_PORT 443
+
+// SSL/HTTPS Configuration
+#define ENABLE_HTTPS              true
+#define REDIRECT_HTTP_TO_HTTPS    true
 
 // Default system configuration  
 #define DEFAULT_SERIAL_BAUD_RATE  115200

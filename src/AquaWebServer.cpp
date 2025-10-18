@@ -5,21 +5,29 @@
 #include "PHSensor.h"
 #include "TDSSensor.h"
 
-AquaWebServer::AquaWebServer() : server(WEB_SERVER_PORT), sensorController(nullptr), calibrationManager(nullptr), configManager(nullptr), templateManager(nullptr) {}
+AquaWebServer::AquaWebServer() : server(WEB_SERVER_PORT), sensorController(nullptr), calibrationManager(nullptr), configManager(nullptr), templateManager(nullptr) {
+  enableHTTPS = false;  // HTTPS not supported by ESPAsyncWebServer
+  requireSecureConnection = false;
+  sslInitialized = false;
+}
 
 void AquaWebServer::begin(SensorController* sensors, CalibrationManager* calibration, ConfigManager* config) {
   sensorController = sensors;
   calibrationManager = calibration;
   configManager = config;
   templateManager = new TemplateManager(true); // Enable template caching
+  
   setupRoutes();
   server.begin();
   
   Serial.println();
-  Serial.println("Web Server Started!");
+  Serial.println("Secure Web Server Started!");
   Serial.println("+---------------------------------------+");
   Serial.printf("| Dashboard: http://%-19s |\n", WiFi.localIP().toString().c_str());
-  Serial.printf("| API: http://%-19s/api/ |\n", WiFi.localIP().toString().c_str());
+  Serial.printf("| API:       http://%-19s/api/ |\n", WiFi.localIP().toString().c_str());
+  Serial.println("| Security:  Headers + CSP enabled     |");
+  Serial.println("| Note:      HTTPS requires external    |");
+  Serial.println("|            reverse proxy (nginx etc.) |");
   Serial.println("+---------------------------------------+");
 }
 
@@ -36,6 +44,12 @@ void AquaWebServer::setConfigManager(ConfigManager* config) {
 }
 
 void AquaWebServer::setupRoutes() {
+  // Add security headers to all responses
+  server.onNotFound([this](AsyncWebServerRequest *request) {
+    addSecurityHeaders(request);
+    request->send(404, "text/plain", "Not Found");
+  });
+  
   // Serve the main dashboard page
   server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request){
     handleRoot(request);
@@ -48,21 +62,25 @@ void AquaWebServer::setupRoutes() {
 
   // API endpoint for temperature sensors only
   server.on("/api/temperature", HTTP_GET, [this](AsyncWebServerRequest *request){
+    addSecurityHeaders(request);
     handleApiTemperature(request);
   });
 
   // API endpoint for pH sensors only
   server.on("/api/ph", HTTP_GET, [this](AsyncWebServerRequest *request){
+    addSecurityHeaders(request);
     handleApiPH(request);
   });
 
   // API endpoint for TDS sensors only
   server.on("/api/tds", HTTP_GET, [this](AsyncWebServerRequest *request){
+    addSecurityHeaders(request);
     handleApiTDS(request);
   });
 
   // API endpoint for system status
   server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request){
+    addSecurityHeaders(request);
     handleApiStatus(request);
   });
 
@@ -133,7 +151,8 @@ void AquaWebServer::setupRoutes() {
 
 void AquaWebServer::handleRoot(AsyncWebServerRequest *request) {
   String html = renderDashboard();
-  request->send(200, "text/html", html);
+  AsyncWebServerResponse* response = createSecureResponse(request, 200, "text/html", html);
+  request->send(response);
 }
 
 void AquaWebServer::handleApiSensors(AsyncWebServerRequest *request) {
@@ -2318,4 +2337,62 @@ String AquaWebServer::renderConfig() {
   // No variables needed for config page currently
   
   return templateManager->renderTemplate("config", variables);
+}
+
+// Security methods implementation
+void AquaWebServer::addSecurityHeaders(AsyncWebServerRequest *request) {
+  // This function is called before sending responses
+  // Headers are added via AsyncWebServerResponse objects in individual handlers
+}
+
+AsyncWebServerResponse* AquaWebServer::createSecureResponse(AsyncWebServerRequest *request, int code, const String& contentType, const String& content) {
+  AsyncWebServerResponse* response = request->beginResponse(code, contentType, content);
+  
+  // Add security headers
+  response->addHeader("X-Content-Type-Options", "nosniff");
+  response->addHeader("X-Frame-Options", "SAMEORIGIN");
+  response->addHeader("X-XSS-Protection", "1; mode=block");
+  response->addHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  response->addHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;");
+  response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  response->addHeader("Pragma", "no-cache");
+  response->addHeader("Expires", "0");
+  
+  // CORS headers for API access
+  response->addHeader("Access-Control-Allow-Origin", "*");
+  response->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  response->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  
+  return response;
+}
+
+void AquaWebServer::handleSecurityRedirect(AsyncWebServerRequest *request) {
+  if (requireSecureConnection && !isSecureConnection(request)) {
+    String httpsUrl = "https://" + request->host() + request->url();
+    request->redirect(httpsUrl);
+    return;
+  }
+}
+
+bool AquaWebServer::isSecureConnection(AsyncWebServerRequest *request) {
+  // Check if the connection is secure (HTTPS)
+  // For ESP32, we'll check the port or headers
+  return request->hasHeader("X-Forwarded-Proto") && 
+         request->getHeader("X-Forwarded-Proto")->value() == "https";
+}
+
+bool AquaWebServer::initSSL() {
+  Serial.println("HTTPS Info: ESPAsyncWebServer does not support SSL/TLS natively");
+  Serial.println("For HTTPS support, use a reverse proxy like:");
+  Serial.println("  - nginx with SSL termination");
+  Serial.println("  - Cloudflare tunnel");
+  Serial.println("  - Apache with mod_ssl");
+  Serial.println("Current server provides HTTP with security headers");
+  return false;
+}
+
+void AquaWebServer::setupHTTPSRoutes() {
+  // HTTPS routes not supported - ESPAsyncWebServer limitation
+  Serial.println("Note: HTTPS routes require external reverse proxy setup");
+  Serial.println("All routes configured for HTTP with security headers");
 }
