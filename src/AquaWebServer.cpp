@@ -1,11 +1,17 @@
 #include "AquaWebServer.h"
 #include "SystemMonitor.h"
+#include "SensorManager.h"
+#include "TemperatureSensor.h"
+#include "PHSensor.h"
+#include "TDSSensor.h"
 
-AquaWebServer::AquaWebServer() : server(WEB_SERVER_PORT), sensorController(nullptr), calibrationManager(nullptr) {}
+AquaWebServer::AquaWebServer() : server(WEB_SERVER_PORT), sensorController(nullptr), calibrationManager(nullptr), configManager(nullptr), templateManager(nullptr) {}
 
-void AquaWebServer::begin(SensorController* sensors, CalibrationManager* calibration) {
+void AquaWebServer::begin(SensorController* sensors, CalibrationManager* calibration, ConfigManager* config) {
   sensorController = sensors;
   calibrationManager = calibration;
+  configManager = config;
+  templateManager = new TemplateManager(true); // Enable template caching
   setupRoutes();
   server.begin();
   
@@ -23,6 +29,10 @@ void AquaWebServer::setSensorController(SensorController* sensors) {
 
 void AquaWebServer::setCalibrationManager(CalibrationManager* calibration) {
   calibrationManager = calibration;
+}
+
+void AquaWebServer::setConfigManager(ConfigManager* config) {
+  configManager = config;
 }
 
 void AquaWebServer::setupRoutes() {
@@ -54,6 +64,11 @@ void AquaWebServer::setupRoutes() {
   // API endpoint for system status
   server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest *request){
     handleApiStatus(request);
+  });
+
+  // API endpoint for aquarium data with range checking
+  server.on("/api/aquariums", HTTP_GET, [this](AsyncWebServerRequest *request){
+    handleApiAquariums(request);
   });
 
   // Calibration routes
@@ -89,6 +104,27 @@ void AquaWebServer::setupRoutes() {
     handleDiagnosticsPage(request);
   });
 
+  // Admin and Configuration routes
+  server.on("/admin", HTTP_GET, [this](AsyncWebServerRequest *request){
+    handleAdminPage(request);
+  });
+  
+  server.on("/admin/login", HTTP_POST, [this](AsyncWebServerRequest *request){
+    handleAdminLogin(request);
+  });
+  
+  server.on("/config", HTTP_GET, [this](AsyncWebServerRequest *request){
+    handleConfigPage(request);
+  });
+  
+  server.on("/api/config", HTTP_GET, [this](AsyncWebServerRequest *request){
+    handleApiConfig(request);
+  });
+  
+  server.on("/api/config", HTTP_POST, [this](AsyncWebServerRequest *request){
+    handleApiConfigSave(request);
+  });
+
   // Enable CORS for API access from other domains
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE");
@@ -96,7 +132,7 @@ void AquaWebServer::setupRoutes() {
 }
 
 void AquaWebServer::handleRoot(AsyncWebServerRequest *request) {
-  String html = generateDashboardHTML();
+  String html = renderDashboard();
   request->send(200, "text/html", html);
 }
 
@@ -288,7 +324,125 @@ void AquaWebServer::handleApiStatus(AsyncWebServerRequest *request) {
   request->send(200, "application/json", response);
 }
 
+void AquaWebServer::handleApiAquariums(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  
+  if (!configManager || !sensorController) {
+    doc["error"] = "Configuration or sensor controller not available";
+    String response;
+    serializeJson(doc, response);
+    request->send(500, "application/json", response);
+    return;
+  }
+  
+  // Get sensor data
+  TemperatureData tempData = sensorController->getTemperatureSensors().getData();
+  PHData phData = sensorController->getPHSensors().getData();
+  TDSData tdsData = sensorController->getTDSSensors().getData();
+  
+  doc["timestamp"] = millis();
+  doc["aquarium_count"] = configManager->getAquariumCount();
+  
+  JsonArray aquariums = doc["aquariums"].to<JsonArray>();
+  
+  // Process each configured aquarium
+  for (int aqIndex = 0; aqIndex < configManager->getAquariumCount(); aqIndex++) {
+    JsonObject aquarium = aquariums.add<JsonObject>();
+    
+    // Basic aquarium info
+    aquarium["id"] = configManager->getAquariumID(aqIndex);
+    aquarium["name"] = configManager->getAquariumName(aqIndex);
+    aquarium["description"] = configManager->getAquariumDescription(aqIndex);
+    aquarium["enabled"] = configManager->isAquariumEnabled(aqIndex);
+    
+    if (!configManager->isAquariumEnabled(aqIndex)) {
+      continue; // Skip disabled aquariums
+    }
+    
+    // Temperature sensors for this aquarium
+    JsonArray tempSensors = aquarium["sensors"]["temperature"].to<JsonArray>();
+    for (int i = 0; i < configManager->getTemperatureSensorCount(aqIndex); i++) {
+      int sensorId = configManager->getTemperatureSensorID(aqIndex, i);
+      if (sensorId >= 0 && sensorId < NUM_TEMP_SENSORS) {
+        JsonObject tempSensor = tempSensors.add<JsonObject>();
+        tempSensor["id"] = sensorId;
+        tempSensor["value"] = tempData.readings[sensorId];
+        tempSensor["min_range"] = configManager->getTemperatureMin(aqIndex);
+        tempSensor["max_range"] = configManager->getTemperatureMax(aqIndex);
+        tempSensor["in_range"] = configManager->isTemperatureInRange(aqIndex, tempData.readings[sensorId]);
+        tempSensor["status"] = tempSensor["in_range"].as<bool>() ? "normal" : "alarm";
+      }
+    }
+    
+    // pH sensors for this aquarium
+    JsonArray phSensors = aquarium["sensors"]["ph"].to<JsonArray>();
+    for (int i = 0; i < configManager->getPHSensorCount(aqIndex); i++) {
+      int sensorId = configManager->getPHSensorID(aqIndex, i);
+      if (sensorId >= 0 && sensorId < NUM_PH_SENSORS) {
+        JsonObject phSensor = phSensors.add<JsonObject>();
+        phSensor["id"] = sensorId;
+        phSensor["value"] = phData.readings[sensorId];
+        phSensor["min_range"] = configManager->getPHMin(aqIndex);
+        phSensor["max_range"] = configManager->getPHMax(aqIndex);
+        phSensor["in_range"] = configManager->isPHInRange(aqIndex, phData.readings[sensorId]);
+        phSensor["status"] = phSensor["in_range"].as<bool>() ? "normal" : "alarm";
+      }
+    }
+    
+    // TDS sensors for this aquarium
+    JsonArray tdsSensors = aquarium["sensors"]["tds"].to<JsonArray>();
+    for (int i = 0; i < configManager->getTDSSensorCount(aqIndex); i++) {
+      int sensorId = configManager->getTDSSensorID(aqIndex, i);
+      if (sensorId >= 0 && sensorId < NUM_TDS_SENSORS) {
+        JsonObject tdsSensor = tdsSensors.add<JsonObject>();
+        tdsSensor["id"] = sensorId;
+        tdsSensor["value"] = tdsData.readings[sensorId];
+        tdsSensor["min_range"] = configManager->getTDSMin(aqIndex);
+        tdsSensor["max_range"] = configManager->getTDSMax(aqIndex);
+        tdsSensor["in_range"] = configManager->isTDSInRange(aqIndex, tdsData.readings[sensorId]);
+        tdsSensor["status"] = tdsSensor["in_range"].as<bool>() ? "normal" : "alarm";
+      }
+    }
+    
+    // Calculate overall aquarium health
+    bool allInRange = true;
+    for (int i = 0; i < configManager->getTemperatureSensorCount(aqIndex); i++) {
+      int sensorId = configManager->getTemperatureSensorID(aqIndex, i);
+      if (sensorId >= 0 && !configManager->isTemperatureInRange(aqIndex, tempData.readings[sensorId])) {
+        allInRange = false;
+        break;
+      }
+    }
+    if (allInRange) {
+      for (int i = 0; i < configManager->getPHSensorCount(aqIndex); i++) {
+        int sensorId = configManager->getPHSensorID(aqIndex, i);
+        if (sensorId >= 0 && !configManager->isPHInRange(aqIndex, phData.readings[sensorId])) {
+          allInRange = false;
+          break;
+        }
+      }
+    }
+    if (allInRange) {
+      for (int i = 0; i < configManager->getTDSSensorCount(aqIndex); i++) {
+        int sensorId = configManager->getTDSSensorID(aqIndex, i);
+        if (sensorId >= 0 && !configManager->isTDSInRange(aqIndex, tdsData.readings[sensorId])) {
+          allInRange = false;
+          break;
+        }
+      }
+    }
+    
+    aquarium["overall_status"] = allInRange ? "healthy" : "alarm";
+  }
+  
+  String response;
+  serializeJson(doc, response);
+  
+  request->send(200, "application/json", response);
+}
+
 void AquaWebServer::handleCalibrationPage(AsyncWebServerRequest *request) {
+  // TODO: Convert to template-based rendering
   String html = generateCalibrationHTML();
   request->send(200, "text/html", html);
 }
@@ -465,6 +619,7 @@ void AquaWebServer::handleCalibrationReading(AsyncWebServerRequest *request) {
 }
 
 void AquaWebServer::handleHelpPage(AsyncWebServerRequest *request) {
+  // TODO: Convert to template-based rendering
   String html = generateHelpHTML();
   request->send(200, "text/html", html);
 }
@@ -543,9 +698,31 @@ String AquaWebServer::generateDashboardHTML() {
         
         .sensor-value { 
             font-weight: bold; 
-            color: #2c5f91; 
             font-family: 'Courier New', monospace;
             font-size: 0.9em;
+        }
+        
+        /* Range-based color coding for sensor values */
+        .sensor-value.in-range { 
+            color: #28a745; 
+            background-color: #d4edda;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .sensor-value.out-of-range { 
+            color: #dc3545; 
+            background-color: #f8d7da;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #f5c6cb;
+            animation: blink-warning 2s infinite;
+        }
+        
+        @keyframes blink-warning {
+            0%, 50% { opacity: 1; }
+            25%, 75% { opacity: 0.7; }
         }
         
         /* Controls */
@@ -641,6 +818,9 @@ String AquaWebServer::generateDashboardHTML() {
             <button onclick="location.href='/help'" class="control-button help-button">
                 &#10068; Help & Shopping Guide
             </button>
+            <button onclick="location.href='/admin'" class="control-button admin-button" style="background: linear-gradient(135deg, #6c757d, #5a6268);">
+                &#128274; Admin Panel
+            </button>
         </div>
         
         <div class="timestamp" id="last-update">Loading...</div>
@@ -648,47 +828,88 @@ String AquaWebServer::generateDashboardHTML() {
 
     <script>
         function updateReadings() {
-            fetch('/api/sensors')
+            fetch('/api/aquariums')
                 .then(response => response.json())
                 .then(data => {
                     const gridContainer = document.getElementById('aquarium-grid');
                     gridContainer.innerHTML = '';
                     
-                    // Assuming 8 aquariums (sensors 1-8)
-                    for (let i = 0; i < 8; i++) {
-                        const aquariumDiv = document.createElement('div');
-                        aquariumDiv.className = 'aquarium-box';
-                        
-                        const tempValue = data.temperature[i] ? data.temperature[i].toFixed(2) : '--';
-                        const phValue = data.ph[i] ? data.ph[i].toFixed(2) : '--';
-                        const tdsValue = data.tds[i] ? `${data.tds[i].ppm.toFixed(0)} ppm` : '-- ppm';
-                        const ecValue = data.tds[i] ? `${data.tds[i].ec.toFixed(0)}&#181;S/cm` : '--&#181;S/cm';
-                        
-                        aquariumDiv.innerHTML = `
-                            <div class="aquarium-title">Aquarium ${i + 1}</div>
+                    // Display configured aquariums with color coding
+                    if (data.aquariums && data.aquariums.length > 0) {
+                        data.aquariums.forEach((aquarium) => {
+                            if (!aquarium.enabled) return; // Skip disabled aquariums
                             
-                            <div class="sensor-row temp-row">
-                                <span class="sensor-label">Temp:</span>
-                                <span class="sensor-value">${tempValue}&#176;C</span>
-                            </div>
+                            const aquariumDiv = document.createElement('div');
+                            aquariumDiv.className = 'aquarium-box';
                             
-                            <div class="sensor-row ph-row">
-                                <span class="sensor-label">pH:</span>
-                                <span class="sensor-value">${phValue}</span>
-                            </div>
+                            // Add overall status border color
+                            if (aquarium.overall_status === 'alarm') {
+                                aquariumDiv.style.borderColor = '#dc3545';
+                                aquariumDiv.style.borderWidth = '3px';
+                                aquariumDiv.style.boxShadow = '0 4px 15px rgba(220,53,69,0.2)';
+                            } else {
+                                aquariumDiv.style.borderColor = '#28a745';
+                                aquariumDiv.style.borderWidth = '2px';
+                            }
                             
-                            <div class="sensor-row tds-row">
-                                <span class="sensor-label">TDS:</span>
-                                <span class="sensor-value">${tdsValue}</span>
-                            </div>
+                            let sensorRowsHTML = '';
                             
-                            <div class="sensor-row tds-row" style="margin-top: 2px;">
-                                <span class="sensor-label">EC:</span>
-                                <span class="sensor-value">${ecValue}</span>
-                            </div>
-                        `;
-                        
-                        gridContainer.appendChild(aquariumDiv);
+                            // Temperature sensors with range checking
+                            if (aquarium.sensors && aquarium.sensors.temperature) {
+                                aquarium.sensors.temperature.forEach(tempSensor => {
+                                    const rangeClass = tempSensor.in_range ? 'in-range' : 'out-of-range';
+                                    const tempValue = tempSensor.value ? tempSensor.value.toFixed(2) : '--';
+                                    sensorRowsHTML += `
+                                        <div class="sensor-row temp-row">
+                                            <span class="sensor-label">Temp ${tempSensor.id + 1}:</span>
+                                            <span class="sensor-value ${rangeClass}" title="Range: ${tempSensor.min_range}&#176;C - ${tempSensor.max_range}&#176;C">${tempValue}&#176;C</span>
+                                        </div>
+                                    `;
+                                });
+                            }
+                            
+                            // pH sensors with range checking
+                            if (aquarium.sensors && aquarium.sensors.ph) {
+                                aquarium.sensors.ph.forEach(phSensor => {
+                                    const rangeClass = phSensor.in_range ? 'in-range' : 'out-of-range';
+                                    const phValue = phSensor.value ? phSensor.value.toFixed(2) : '--';
+                                    sensorRowsHTML += `
+                                        <div class="sensor-row ph-row">
+                                            <span class="sensor-label">pH ${phSensor.id + 1}:</span>
+                                            <span class="sensor-value ${rangeClass}" title="Range: ${phSensor.min_range} - ${phSensor.max_range}">${phValue}</span>
+                                        </div>
+                                    `;
+                                });
+                            }
+                            
+                            // TDS sensors with range checking
+                            if (aquarium.sensors && aquarium.sensors.tds) {
+                                aquarium.sensors.tds.forEach(tdsSensor => {
+                                    const rangeClass = tdsSensor.in_range ? 'in-range' : 'out-of-range';
+                                    const tdsValue = tdsSensor.value ? tdsSensor.value.toFixed(0) : '--';
+                                    sensorRowsHTML += `
+                                        <div class="sensor-row tds-row">
+                                            <span class="sensor-label">TDS ${tdsSensor.id + 1}:</span>
+                                            <span class="sensor-value ${rangeClass}" title="Range: ${tdsSensor.min_range} - ${tdsSensor.max_range} ppm">${tdsValue} ppm</span>
+                                        </div>
+                                    `;
+                                });
+                            }
+                            
+                            aquariumDiv.innerHTML = `
+                                <div class="aquarium-title">${aquarium.name}</div>
+                                <div style="text-align: center; font-size: 0.8em; color: #666; margin-bottom: 10px;">${aquarium.description}</div>
+                                ${sensorRowsHTML}
+                                <div style="text-align: center; margin-top: 10px; font-weight: bold; color: ${aquarium.overall_status === 'healthy' ? '#28a745' : '#dc3545'}">
+                                    ${aquarium.overall_status === 'healthy' ? 'All Normal' : 'ALERT'}
+                                </div>
+                            `;
+                            
+                            gridContainer.appendChild(aquariumDiv);
+                        });
+                    } else {
+                        // Fallback message if no aquariums configured
+                        gridContainer.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 20px; color: #666;">No aquariums configured. Please check configuration.</div>';
                     }
                     
                     // Update timestamp
@@ -974,7 +1195,7 @@ String AquaWebServer::generateCalibrationHTML() {
         function getStabilityThreshold(sensorType) {
             // Stability thresholds for different sensor types
             switch(sensorType) {
-                case 'temperature': return 0.1; // ±0.1°C
+                case 'temperature': return 0.1; // +/-0.1C
                 case 'ph': return 0.05; // +/-0.05 pH
                 case 'tds': return 2.0; // +/-2 ppm
                 default: return 0.1;
@@ -1572,6 +1793,7 @@ String AquaWebServer::generateHelpHTML() {
 }
 
 void AquaWebServer::handleDiagnosticsPage(AsyncWebServerRequest *request) {
+  // TODO: Convert to template-based rendering
   String html = generateDiagnosticsHTML();
   request->send(200, "text/html", html);
 }
@@ -1755,4 +1977,345 @@ String AquaWebServer::generateDiagnosticsHTML() {
     </script>
 </body>
 </html>)HTML";
+}
+
+// Admin authentication page
+void AquaWebServer::handleAdminPage(AsyncWebServerRequest *request) {
+  String html = renderAdminLogin();
+  request->send(200, "text/html", html);
+}
+
+// Handle admin login
+void AquaWebServer::handleAdminLogin(AsyncWebServerRequest *request) {
+  if (!configManager) {
+    request->send(500, "text/plain", "Configuration not available");
+    return;
+  }
+  
+  // Get parameters safely
+  const AsyncWebParameter* usernameParam = request->getParam("username", true);
+  const AsyncWebParameter* passwordParam = request->getParam("password", true);
+  
+  if (!usernameParam || !passwordParam) {
+    Serial.println("Missing username or password parameter");
+    request->redirect("/admin?error=1");
+    return;
+  }
+  
+  String username = usernameParam->value();
+  String password = passwordParam->value();
+  
+  String configUsername = configManager->getAdminUsername();
+  String configPassword = configManager->getAdminPassword();
+  
+  Serial.printf("Login attempt: '%s' / '%s'\n", username.c_str(), password.c_str());
+  Serial.printf("Expected: '%s' / '%s'\n", configUsername.c_str(), configPassword.c_str());
+  
+  if (username == configUsername && password == configPassword) {
+    Serial.println("Login successful!");
+    // In a real implementation, you'd set a session token or cookie
+    request->redirect("/config");
+  } else {
+    Serial.println("Login failed!");
+    request->redirect("/admin?error=1");
+  }
+}// Configuration management page
+void AquaWebServer::handleConfigPage(AsyncWebServerRequest *request) {
+  String html = renderConfig();
+  request->send(200, "text/html", html);
+}
+
+// API endpoint to get current configuration
+void AquaWebServer::handleApiConfig(AsyncWebServerRequest *request) {
+  if (!configManager) {
+    request->send(500, "application/json", "{\"error\":\"Configuration not available\"}");
+    return;
+  }
+  
+  JsonDocument doc;
+  
+  // System configuration
+  doc["system"]["device_name"] = configManager->getDeviceName();
+  doc["system"]["sensor_read_interval"] = configManager->getSensorReadInterval();
+  
+  // WiFi configuration (don't expose password)
+  doc["wifi"]["ssid"] = configManager->getWifiSSID();
+  
+  // Aquarium configuration
+  JsonArray aquariums = doc["aquariums"].to<JsonArray>();
+  for (int i = 0; i < configManager->getAquariumCount(); i++) {
+    JsonObject aq = aquariums.add<JsonObject>();
+    aq["id"] = configManager->getAquariumID(i);
+    aq["name"] = configManager->getAquariumName(i);
+    aq["description"] = configManager->getAquariumDescription(i);
+    aq["enabled"] = configManager->isAquariumEnabled(i);
+    
+    // Sensor ranges
+    aq["temperature"]["min"] = configManager->getTemperatureMin(i);
+    aq["temperature"]["max"] = configManager->getTemperatureMax(i);
+    aq["ph"]["min"] = configManager->getPHMin(i);
+    aq["ph"]["max"] = configManager->getPHMax(i);
+    aq["tds"]["min"] = configManager->getTDSMin(i);
+    aq["tds"]["max"] = configManager->getTDSMax(i);
+    
+    // Sensor assignments
+    JsonArray tempSensors = aq["temperature"]["sensors"].to<JsonArray>();
+    for (int j = 0; j < configManager->getTemperatureSensorCount(i); j++) {
+      tempSensors.add(configManager->getTemperatureSensorID(i, j));
+    }
+    JsonArray phSensors = aq["ph"]["sensors"].to<JsonArray>();
+    for (int j = 0; j < configManager->getPHSensorCount(i); j++) {
+      phSensors.add(configManager->getPHSensorID(i, j));
+    }
+    JsonArray tdsSensors = aq["tds"]["sensors"].to<JsonArray>();
+    for (int j = 0; j < configManager->getTDSSensorCount(i); j++) {
+      tdsSensors.add(configManager->getTDSSensorID(i, j));
+    }
+  }
+  
+  String response;
+  serializeJson(doc, response);
+  request->send(200, "application/json", response);
+}
+
+// API endpoint to save configuration (simplified - in reality would need file writing)
+void AquaWebServer::handleApiConfigSave(AsyncWebServerRequest *request) {
+  // For now, just acknowledge the save request
+  // In a full implementation, this would update the config.json file
+  request->send(200, "application/json", "{\"status\":\"Configuration saved\",\"note\":\"Restart required for changes to take effect\"}");
+}
+
+String AquaWebServer::generateAdminHTML() {
+  return R"HTML(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Login - ESP32 Aqua Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: Arial; 
+            margin: 0; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .login-container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        .logo {
+            text-align: center;
+            font-size: 1.5em;
+            color: #2c5f91;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input[type="text"]:focus, input[type="password"]:focus {
+            border-color: #2c5f91;
+            outline: none;
+        }
+        .login-button {
+            width: 100%;
+            background: linear-gradient(135deg, #2c5f91, #3d6fa7);
+            color: white;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .login-button:hover {
+            background: linear-gradient(135deg, #1e4a6f, #2c5f91);
+        }
+        .error {
+            color: #dc3545;
+            text-align: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #f8d7da;
+            border-radius: 6px;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .back-link a {
+            color: #2c5f91;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">&#9632; Aqua Monitor Admin</div>
+        
+        <script>
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('error')) {
+                document.write('<div class="error">Invalid username or password</div>');
+            }
+        </script>
+        
+        <form method="POST" action="/admin/login">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            
+            <button type="submit" class="login-button">Login</button>
+        </form>
+        
+        <div class="back-link">
+            <a href="/">&larr; Back to Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>)HTML";
+}
+
+String AquaWebServer::generateConfigHTML() {
+  return R"HTML(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Configuration - ESP32 Aqua Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: Arial; 
+            margin: 20px; 
+            background: #f0f8ff; 
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+        }
+        h1 { 
+            color: #2c5f91; 
+            text-align: center; 
+            margin-bottom: 30px; 
+        }
+        .config-section {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .section-title {
+            font-size: 1.2em;
+            color: #2c5f91;
+            font-weight: bold;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 10px;
+        }
+        .aquarium-card {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #f8f9fa;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .button {
+            background: linear-gradient(135deg, #2c5f91, #3d6fa7);
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>&#9632; Aquarium Configuration</h1>
+        <p style="text-align: center; color: #666;">Configuration interface will be fully implemented in the next update.</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <button class="button" onclick="location.href='/'">&#8962; Back to Dashboard</button>
+        </div>
+    </div>
+</body>
+</html>)HTML";
+}
+
+// New template-based rendering methods
+String AquaWebServer::renderDashboard() {
+  if (!templateManager) {
+    return "Template manager not initialized";
+  }
+  
+  std::map<String, String> variables;
+  variables["WIFI_SSID"] = configManager ? configManager->getWifiSSID() : "Unknown";
+  variables["IP_ADDRESS"] = WiFi.localIP().toString();
+  
+  // Calculate uptime
+  unsigned long uptime = millis() / 1000;
+  unsigned long days = uptime / 86400;
+  unsigned long hours = (uptime % 86400) / 3600;
+  unsigned long minutes = (uptime % 3600) / 60;
+  String uptimeStr = String(days) + "d " + String(hours) + "h " + String(minutes) + "m";
+  variables["UPTIME"] = uptimeStr;
+  
+  return templateManager->renderTemplate("dashboard", variables);
+}
+
+String AquaWebServer::renderAdminLogin() {
+  if (!templateManager) {
+    return "Template manager not initialized";
+  }
+  
+  std::map<String, String> variables;
+  // No variables needed for admin login currently
+  
+  return templateManager->renderTemplate("admin_login", variables);
+}
+
+String AquaWebServer::renderConfig() {
+  if (!templateManager) {
+    return "Template manager not initialized";
+  }
+  
+  std::map<String, String> variables;
+  // No variables needed for config page currently
+  
+  return templateManager->renderTemplate("config", variables);
 }

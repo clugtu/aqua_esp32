@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Login - ESP32 Aqua Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: Arial; 
+            margin: 0; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .login-container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        .logo {
+            text-align: center;
+            font-size: 1.5em;
+            color: #2c5f91;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input[type="text"]:focus, input[type="password"]:focus {
+            border-color: #2c5f91;
+            outline: none;
+        }
+        .login-button {
+            width: 100%;
+            background: linear-gradient(135deg, #2c5f91, #3d6fa7);
+            color: white;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .login-button:hover {
+            background: linear-gradient(135deg, #1e4a6f, #2c5f91);
+        }
+        .error {
+            color: #dc3545;
+            text-align: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #f8d7da;
+            border-radius: 6px;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .back-link a {
+            color: #2c5f91;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">&#9632; Aqua Monitor Admin</div>
+        
+        <script>
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('error')) {
+                document.write('<div class="error">Invalid username or password</div>');
+            }
+        </script>
+        
+        <form method="POST" action="/admin/login">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            
+            <button type="submit" class="login-button">Login</button>
+        </form>
+        
+        <div class="back-link">
+            <a href="/">&larr; Back to Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>

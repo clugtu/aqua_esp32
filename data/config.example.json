@@ -3,6 +3,13 @@
     "ssid": "YOUR_WIFI_SSID",
     "password": "YOUR_WIFI_PASSWORD"
   },
+  "security": {
+    "admin_username": "admin",
+    "admin_password": "admin",
+    "ssl_enabled": true,
+    "ssl_port": 443,
+    "http_port": 80
+  },
   "system": {
     "device_name": "ESP32 Aqua Monitor",
     "serial_baud": 115200,
@@ -27,5 +34,79 @@
     "mux_s2": 18,
     "mux_s3": 19,
     "mux_enable": 21
-  }
+  },
+  "aquariums": [
+    {
+      "id": "aquarium_1",
+      "name": "Main Tank",
+      "description": "Primary aquarium system",
+      "enabled": true,
+      "sensors": {
+        "temperature": {
+          "sensor_ids": [0, 1],
+          "normal_range": {"min": 22.0, "max": 26.0},
+          "calibration": {
+            "isCalibrated": false,
+            "point1": {"measured": 0.0, "actual": 0.0},
+            "point2": {"measured": 100.0, "actual": 100.0}
+          }
+        },
+        "ph": {
+          "sensor_ids": [0, 1],
+          "normal_range": {"min": 6.5, "max": 7.5},
+          "calibration": {
+            "isCalibrated": false,
+            "point1": {"measured": 0.0, "actual": 4.0},
+            "point2": {"measured": 1024.0, "actual": 10.0},
+            "point3": {"measured": 512.0, "actual": 7.0}
+          }
+        },
+        "tds": {
+          "sensor_ids": [0, 1],
+          "normal_range": {"min": 100, "max": 300},
+          "calibration": {
+            "isCalibrated": false,
+            "point1": {"measured": 0.0, "actual": 0.0},
+            "point2": {"measured": 1000.0, "actual": 1000.0}
+          }
+        }
+      }
+    },
+    {
+      "id": "aquarium_2",
+      "name": "Quarantine Tank",
+      "description": "Isolation and treatment tank",
+      "enabled": true,
+      "sensors": {
+        "temperature": {
+          "sensor_ids": [2],
+          "normal_range": {"min": 24.0, "max": 28.0},
+          "calibration": {
+            "isCalibrated": false,
+            "point1": {"measured": 0.0, "actual": 0.0},
+            "point2": {"measured": 100.0, "actual": 100.0}
+          }
+        },
+        "ph": {
+          "sensor_ids": [2],
+          "normal_range": {"min": 6.0, "max": 8.0},
+          "calibration": {
+            "isCalibrated": false,
+            "point1": {"measured": 0.0, "actual": 4.0},
+            "point2": {"measured": 1024.0, "actual": 10.0},
+            "point3": {"measured": 512.0, "actual": 7.0}
+          }
+        },
+        "tds": {
+          "sensor_ids": [2],
+          "normal_range": {"min": 50, "max": 200},
+          "calibration": {
+            "isCalibrated": false,
+            "point1": {"measured": 0.0, "actual": 0.0},
+            "point2": {"measured": 1000.0, "actual": 1000.0}
+          }
+        }
+      }
+    }
+  ]
 }

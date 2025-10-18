@@ -17,6 +17,9 @@ bool NetworkManager::connect() {
   String ssid = configMgr->getWifiSSID();
   String password = configMgr->getWifiPassword();
   
+  Serial.println("DEBUG: WiFi Configuration from ConfigManager:");
+  Serial.printf("DEBUG: SSID: '%s'\n", ssid.c_str());
+  Serial.printf("DEBUG: Password: '%s'\n", password.c_str());
   Serial.println("Connecting to WiFi...");
   Serial.printf("SSID: %s\n", ssid.c_str());
   Serial.print("Status: ");

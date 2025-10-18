@@ -261,6 +261,54 @@ for i, tds in enumerate(data['tds']):
     print(f"Tank {i+1} TDS: {tds['ppm']} ppm ({tds['ec']} μS/cm)")
 ```
 
+## Architecture & Code Organization
+
+### Template-Based Web Interface
+The ESP32 Aqua Monitor uses a modern template-based architecture for maintainable web interfaces:
+
+**Template Manager System:**
+- **Templates**: HTML files stored in `data/templates/` directory
+- **Template Engine**: `TemplateManager.cpp` handles loading and variable substitution  
+- **Template Caching**: Templates cached in memory for performance
+- **Variable Substitution**: `{{VARIABLE}}` format for dynamic content
+
+**Template Files:**
+- `dashboard.html` - Main aquarium monitoring interface
+- `admin_login.html` - Administrative authentication page  
+- `config.html` - System configuration interface
+- `calibration.html` - Sensor calibration interface (planned)
+- `diagnostics.html` - System diagnostics page (planned)
+- `help.html` - User guide and shopping recommendations (planned)
+
+**Advantages:**
+- **Maintainable**: Separate HTML/CSS from C++ code
+- **Faster Development**: Edit templates without recompiling firmware
+- **Better Organization**: Clear separation of presentation and logic
+- **Template Reuse**: Common layouts and components
+- **Memory Efficient**: Templates cached and loaded from SPIFFS
+
+**File Organization:**
+```
+data/
+├── templates/           # HTML template files
+│   ├── dashboard.html
+│   ├── admin_login.html
+│   ├── config.html
+│   └── ...
+├── config.json         # Runtime configuration
+└── config.example.json # Configuration template
+
+src/
+├── TemplateManager.cpp # Template loading and processing
+├── AquaWebServer.cpp   # Web server logic (reduced size)
+└── ...
+
+include/
+├── TemplateManager.h   # Template manager interface
+├── AquaWebServer.h     # Web server interface
+└── ...
+```
+
 ## Current Features
 
 - **Multi-sensor monitoring**: 8 temperature + 8 pH + 8 TDS sensors (24 total)

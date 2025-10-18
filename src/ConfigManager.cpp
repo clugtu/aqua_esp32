@@ -1,18 +1,23 @@
 #include "ConfigManager.h"
+#include "Config.h"
 
 ConfigManager::ConfigManager() : configLoaded(false) {
 }
 
 bool ConfigManager::begin() {
+  Serial.println("DEBUG: ConfigManager::begin() called");
+  
   if (!initSPIFFS()) {
     Serial.println("Failed to initialize SPIFFS");
     return false;
   }
+  Serial.println("DEBUG: SPIFFS initialized successfully");
   
   if (!loadConfigFile()) {
     Serial.println("Failed to load configuration file");
     return false;
   }
+  Serial.println("DEBUG: Config file loaded successfully");
   
   configLoaded = true;
   Serial.println("Configuration loaded successfully");
@@ -28,14 +33,28 @@ bool ConfigManager::initSPIFFS() {
 }
 
 bool ConfigManager::loadConfigFile() {
+  Serial.println("DEBUG: Attempting to open /config.json");
+  
   File configFile = SPIFFS.open("/config.json", "r");
   if (!configFile) {
+    Serial.println("DEBUG: Failed to open /config.json, trying to list SPIFFS contents...");
+    
+    // List SPIFFS contents for debugging
+    File root = SPIFFS.open("/");
+    File file = root.openNextFile();
+    while(file) {
+      Serial.printf("DEBUG: SPIFFS file found: %s (size: %d)\n", file.name(), file.size());
+      file = root.openNextFile();
+    }
+    
     Serial.println("Failed to open config file");
     return false;
   }
   
   size_t size = configFile.size();
-  if (size > 1024) {
+  Serial.printf("DEBUG: Config file size: %d bytes\n", size);
+  
+  if (size > 4096) {
     Serial.println("Config file size is too large");
     configFile.close();
     return false;
@@ -45,6 +64,10 @@ bool ConfigManager::loadConfigFile() {
   String content = configFile.readString();
   configFile.close();
   
+  Serial.printf("DEBUG: Config file content length: %d\n", content.length());
+  Serial.println("DEBUG: Config file content:");
+  Serial.println(content);
+  
   // Parse JSON
   DeserializationError error = deserializeJson(config, content);
   if (error) {
@@ -53,16 +76,45 @@ bool ConfigManager::loadConfigFile() {
     return false;
   }
   
+  Serial.println("DEBUG: JSON parsed successfully");
   return true;
 }
 
 // WiFi configuration
 String ConfigManager::getWifiSSID() {
-  return configLoaded ? config["wifi"]["ssid"].as<String>() : "DEFAULT_SSID";
+  Serial.printf("DEBUG: getWifiSSID() called, configLoaded = %s\n", configLoaded ? "true" : "false");
+  if (configLoaded) {
+    Serial.println("DEBUG: Checking config WiFi section...");
+    if (config.containsKey("wifi")) {
+      Serial.println("DEBUG: WiFi section found");
+      if (config["wifi"].containsKey("ssid")) {
+        String ssid = config["wifi"]["ssid"].as<String>();
+        Serial.printf("DEBUG: WiFi SSID from config: '%s'\n", ssid.c_str());
+        return ssid;
+      } else {
+        Serial.println("DEBUG: WiFi ssid key not found in config");
+        return "DEFAULT_SSID";
+      }
+    } else {
+      Serial.println("DEBUG: WiFi section not found in config");
+      return "DEFAULT_SSID";
+    }
+  } else {
+    Serial.println("DEBUG: Using default WiFi SSID (config not loaded)");
+    return "DEFAULT_SSID";
+  }
 }
 
 String ConfigManager::getWifiPassword() {
-  return configLoaded ? config["wifi"]["password"].as<String>() : "DEFAULT_PASSWORD";
+  Serial.printf("DEBUG: getWifiPassword() called, configLoaded = %s\n", configLoaded ? "true" : "false");
+  if (configLoaded) {
+    String password = config["wifi"]["password"].as<String>();
+    Serial.printf("DEBUG: WiFi password from config: '%s'\n", password.c_str());
+    return password;
+  } else {
+    Serial.println("DEBUG: Using default WiFi password");
+    return "DEFAULT_PASSWORD";
+  }
 }
 
 // System configuration  
@@ -195,5 +247,213 @@ void ConfigManager::printConfig() {
   Serial.printf("  Multiplexer Control: S0=%d, S1=%d, S2=%d, S3=%d\n", 
                 getMuxS0(), getMuxS1(), getMuxS2(), getMuxS3());
   Serial.printf("  Multiplexer Enable: %d\n", getMuxEnable());
+  
+  Serial.println();
+  Serial.println("Security Configuration:");
+  Serial.printf("  Admin Username: %s\n", getAdminUsername().c_str());
+  Serial.printf("  SSL Enabled: %s\n", isSSLEnabled() ? "true" : "false");
+  Serial.printf("  HTTPS Port: %d\n", getHTTPSPort());
+  Serial.printf("  HTTP Port: %d\n", getHTTPPort());
+  
+  Serial.println();
+  Serial.printf("Aquariums (%d configured):\n", getAquariumCount());
+  for (int i = 0; i < getAquariumCount(); i++) {
+    Serial.printf("  [%d] %s (%s) - %s\n", i, 
+                  getAquariumName(i).c_str(),
+                  getAquariumID(i).c_str(),
+                  isAquariumEnabled(i) ? "Enabled" : "Disabled");
+  }
   Serial.println("========================");
+}
+
+// Security configuration methods
+String ConfigManager::getAdminUsername() {
+  Serial.printf("Debug: configLoaded = %s\n", configLoaded ? "true" : "false");
+  if (configLoaded) {
+    String username = config["security"]["admin_username"].as<String>();
+    Serial.printf("Debug: Admin username from config: '%s'\n", username.c_str());
+    return username;
+  } else {
+    Serial.printf("Debug: Using default admin username: '%s'\n", DEFAULT_ADMIN_USERNAME);
+    return DEFAULT_ADMIN_USERNAME;
+  }
+}
+
+String ConfigManager::getAdminPassword() {
+  if (configLoaded) {
+    String password = config["security"]["admin_password"].as<String>();
+    Serial.printf("Debug: Admin password from config: '%s'\n", password.c_str());
+    return password;
+  } else {
+    Serial.printf("Debug: Using default admin password: '%s'\n", DEFAULT_ADMIN_PASSWORD);
+    return DEFAULT_ADMIN_PASSWORD;
+  }
+}
+
+bool ConfigManager::isSSLEnabled() {
+  return configLoaded ? config["security"]["ssl_enabled"].as<bool>() : DEFAULT_SSL_ENABLED;
+}
+
+int ConfigManager::getHTTPSPort() {
+  return configLoaded ? config["security"]["ssl_port"].as<int>() : DEFAULT_HTTPS_PORT;
+}
+
+int ConfigManager::getHTTPPort() {
+  return configLoaded ? config["security"]["http_port"].as<int>() : DEFAULT_HTTP_PORT;
+}
+
+// Aquarium management methods
+int ConfigManager::getAquariumCount() {
+  if (!configLoaded || !config["aquariums"].is<JsonArray>()) {
+    return 0;
+  }
+  return config["aquariums"].size();
+}
+
+String ConfigManager::getAquariumName(int index) {
+  if (!configLoaded || index < 0 || index >= getAquariumCount()) {
+    return "Unknown";
+  }
+  return config["aquariums"][index]["name"].as<String>();
+}
+
+String ConfigManager::getAquariumID(int index) {
+  if (!configLoaded || index < 0 || index >= getAquariumCount()) {
+    return "unknown";
+  }
+  return config["aquariums"][index]["id"].as<String>();
+}
+
+String ConfigManager::getAquariumDescription(int index) {
+  if (!configLoaded || index < 0 || index >= getAquariumCount()) {
+    return "";
+  }
+  return config["aquariums"][index]["description"].as<String>();
+}
+
+bool ConfigManager::isAquariumEnabled(int index) {
+  if (!configLoaded || index < 0 || index >= getAquariumCount()) {
+    return false;
+  }
+  return config["aquariums"][index]["enabled"].as<bool>();
+}
+
+// Sensor range methods
+float ConfigManager::getTemperatureMin(int aquariumIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return DEFAULT_TEMP_MIN;
+  }
+  return config["aquariums"][aquariumIndex]["sensors"]["temperature"]["normal_range"]["min"].as<float>();
+}
+
+float ConfigManager::getTemperatureMax(int aquariumIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return DEFAULT_TEMP_MAX;
+  }
+  return config["aquariums"][aquariumIndex]["sensors"]["temperature"]["normal_range"]["max"].as<float>();
+}
+
+float ConfigManager::getPHMin(int aquariumIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return DEFAULT_PH_MIN;
+  }
+  return config["aquariums"][aquariumIndex]["sensors"]["ph"]["normal_range"]["min"].as<float>();
+}
+
+float ConfigManager::getPHMax(int aquariumIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return DEFAULT_PH_MAX;
+  }
+  return config["aquariums"][aquariumIndex]["sensors"]["ph"]["normal_range"]["max"].as<float>();
+}
+
+float ConfigManager::getTDSMin(int aquariumIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return DEFAULT_TDS_MIN;
+  }
+  return config["aquariums"][aquariumIndex]["sensors"]["tds"]["normal_range"]["min"].as<float>();
+}
+
+float ConfigManager::getTDSMax(int aquariumIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return DEFAULT_TDS_MAX;
+  }
+  return config["aquariums"][aquariumIndex]["sensors"]["tds"]["normal_range"]["max"].as<float>();
+}
+
+// Sensor assignment methods
+int ConfigManager::getTemperatureSensorCount(int aquariumIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return 0;
+  }
+  JsonArray sensors = config["aquariums"][aquariumIndex]["sensors"]["temperature"]["sensor_ids"];
+  return sensors.size();
+}
+
+int ConfigManager::getTemperatureSensorID(int aquariumIndex, int sensorIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return -1;
+  }
+  JsonArray sensors = config["aquariums"][aquariumIndex]["sensors"]["temperature"]["sensor_ids"];
+  if (sensorIndex < 0 || sensorIndex >= (int)sensors.size()) {
+    return -1;
+  }
+  return sensors[sensorIndex].as<int>();
+}
+
+int ConfigManager::getPHSensorCount(int aquariumIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return 0;
+  }
+  JsonArray sensors = config["aquariums"][aquariumIndex]["sensors"]["ph"]["sensor_ids"];
+  return sensors.size();
+}
+
+int ConfigManager::getPHSensorID(int aquariumIndex, int sensorIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return -1;
+  }
+  JsonArray sensors = config["aquariums"][aquariumIndex]["sensors"]["ph"]["sensor_ids"];
+  if (sensorIndex < 0 || sensorIndex >= (int)sensors.size()) {
+    return -1;
+  }
+  return sensors[sensorIndex].as<int>();
+}
+
+int ConfigManager::getTDSSensorCount(int aquariumIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return 0;
+  }
+  JsonArray sensors = config["aquariums"][aquariumIndex]["sensors"]["tds"]["sensor_ids"];
+  return sensors.size();
+}
+
+int ConfigManager::getTDSSensorID(int aquariumIndex, int sensorIndex) {
+  if (!configLoaded || aquariumIndex < 0 || aquariumIndex >= getAquariumCount()) {
+    return -1;
+  }
+  JsonArray sensors = config["aquariums"][aquariumIndex]["sensors"]["tds"]["sensor_ids"];
+  if (sensorIndex < 0 || sensorIndex >= (int)sensors.size()) {
+    return -1;
+  }
+  return sensors[sensorIndex].as<int>();
+}
+
+// Range checking utilities
+bool ConfigManager::isTemperatureInRange(int aquariumIndex, float value) {
+  float min = getTemperatureMin(aquariumIndex);
+  float max = getTemperatureMax(aquariumIndex);
+  return (value >= min && value <= max);
+}
+
+bool ConfigManager::isPHInRange(int aquariumIndex, float value) {
+  float min = getPHMin(aquariumIndex);
+  float max = getPHMax(aquariumIndex);
+  return (value >= min && value <= max);
+}
+
+bool ConfigManager::isTDSInRange(int aquariumIndex, float value) {
+  float min = getTDSMin(aquariumIndex);
+  float max = getTDSMax(aquariumIndex);
+  return (value >= min && value <= max);
 }

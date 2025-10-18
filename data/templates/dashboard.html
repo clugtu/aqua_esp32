@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32 Aqua Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: Arial; 
+            margin: 20px; 
+            background: #f0f8ff; 
+        }
+        .header { 
+            text-align: center; 
+            margin-bottom: 30px; 
+        }
+        .title { 
+            color: #2c5f91; 
+            font-size: 2em; 
+            margin-bottom: 10px; 
+        }
+        .subtitle { 
+            color: #666; 
+        }
+        .status-bar {
+            background: linear-gradient(135deg, #2c5f91, #3d6fa7);
+            color: white;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .nav-buttons {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .nav-button {
+            background: linear-gradient(135deg, #2c5f91, #3d6fa7);
+            color: white;
+            text-decoration: none;
+            padding: 12px 20px;
+            margin: 5px;
+            border-radius: 8px;
+            display: inline-block;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(44, 95, 145, 0.3);
+            transition: all 0.3s ease;
+        }
+        .nav-button:hover {
+            background: linear-gradient(135deg, #1e4a6f, #2c5f91);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(44, 95, 145, 0.4);
+        }
+        .aquarium-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .aquarium-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border-left: 5px solid #2c5f91;
+        }
+        .aquarium-title {
+            font-size: 1.3em;
+            color: #2c5f91;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        .sensor-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .sensor-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #e0e0e0;
+        }
+        .sensor-label {
+            font-weight: bold;
+            color: #333;
+            font-size: 1.0em;
+            flex: 1;
+        }
+        .sensor-value {
+            font-size: 1.1em;
+            font-weight: bold;
+            padding: 6px 12px;
+            border-radius: 6px;
+            min-width: 100px;
+            text-align: center;
+        }
+        .sensor-value.in-range {
+            background: #d4edda;
+            color: #155724;
+        }
+        .sensor-value.out-of-range {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .sensor-section.in-range {
+            border-left-color: #28a745;
+        }
+        .sensor-section.out-of-range {
+            border-left-color: #dc3545;
+        }
+        .last-update {
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 30px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+        }
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title">&#9632; ESP32 Aqua Monitor</div>
+        <div class="subtitle">Real-time Aquarium Monitoring System</div>
+    </div>
+
+    <div class="status-bar">
+        <div><strong>System Status:</strong> <span id="systemStatus">Online</span></div>
+        <div><strong>WiFi:</strong> <span id="wifiStatus">{{WIFI_SSID}}</span></div>
+        <div><strong>IP:</strong> <span id="ipAddress">{{IP_ADDRESS}}</span></div>
+        <div><strong>Uptime:</strong> <span id="uptime">{{UPTIME}}</span></div>
+    </div>
+
+    <div class="nav-buttons">
+        <a href="/calibrate" class="nav-button">
+            &#9881; Sensor Calibration
+        </a>
+        <a href="/diagnostics" class="nav-button">
+            &#128295; System Diagnostics
+        </a>
+        <a href="/help" class="nav-button">
+            &#10068; Help & Shopping Guide
+        </a>
+        <a href="/admin" class="nav-button">
+            &#128274; Admin Panel
+        </a>
+    </div>
+
+    <div class="aquarium-grid" id="aquariumGrid">
+        <!-- Aquarium cards will be populated by JavaScript -->
+    </div>
+
+    <div class="last-update">
+        Last updated: <span id="lastUpdate">Never</span>
+    </div>
+
+    <script>
+        let updateInterval;
+        
+        async function loadAquariums() {
+            try {
+                const response = await fetch('/api/aquariums');
+                const data = await response.json();
+                
+                const grid = document.getElementById('aquariumGrid');
+                grid.innerHTML = '';
+                
+                data.aquariums.forEach(aquarium => {
+                    const card = createAquariumCard(aquarium);
+                    grid.appendChild(card);
+                });
+                
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleString();
+            } catch (error) {
+                console.error('Error loading aquarium data:', error);
+                document.getElementById('aquariumGrid').innerHTML = 
+                    '<div class="error-message">Error loading aquarium data. Please check your connection.</div>';
+            }
+        }
+        
+        function createAquariumCard(aquarium) {
+            const card = document.createElement('div');
+            card.className = 'aquarium-card';
+            
+            // Get sensor data from the API structure: sensors.temperature[0], sensors.ph[0], etc.
+            const tempSensor = aquarium.sensors.temperature && aquarium.sensors.temperature[0];
+            const phSensor = aquarium.sensors.ph && aquarium.sensors.ph[0];  
+            const tdsSensor = aquarium.sensors.tds && aquarium.sensors.tds[0];
+            
+            const tempValue = tempSensor ? tempSensor.value.toFixed(1) : 'N/A';
+            const phValue = phSensor ? phSensor.value.toFixed(2) : 'N/A';
+            
+            // TDS value is a single number (ppm), calculate EC from it
+            let tdsValue = 'N/A';
+            let ecValue = 'N/A';
+            if (tdsSensor && typeof tdsSensor.value === 'number') {
+                tdsValue = Math.round(tdsSensor.value);
+                ecValue = Math.round(tdsSensor.value * 2); // Rough conversion: EC ≈ TDS * 2
+            }
+            
+            const tempClass = tempSensor && tempSensor.in_range ? 'in-range' : 'out-of-range';
+            const phClass = phSensor && phSensor.in_range ? 'in-range' : 'out-of-range';
+            const tdsClass = tdsSensor && tdsSensor.in_range ? 'in-range' : 'out-of-range';
+            
+            card.innerHTML = `
+                <div class="aquarium-title">${aquarium.name}</div>
+                <div class="sensor-grid">
+                    <div class="sensor-section ${tempClass}">
+                        <div class="sensor-label">Temperature</div>
+                        <div class="sensor-value ${tempClass}" title="Range: ${tempSensor?.min_range}&#176;C - ${tempSensor?.max_range}&#176;C">${tempValue}&#176;C</div>
+                    </div>
+                    <div class="sensor-section ${phClass}">
+                        <div class="sensor-label">pH Level</div>
+                        <div class="sensor-value ${phClass}" title="Range: ${phSensor?.min_range} - ${phSensor?.max_range} pH">${phValue}</div>
+                    </div>
+                    <div class="sensor-section ${tdsClass}">
+                        <div class="sensor-label">TDS / EC</div>
+                        <div class="sensor-value ${tdsClass}" title="Range: ${tdsSensor?.min_range} - ${tdsSensor?.max_range} ppm">${tdsValue} ppm / ${ecValue} &#181;S/cm</div>
+                    </div>
+                </div>
+            `;
+            
+            return card;
+        }
+        
+        function startAutoRefresh() {
+            // Initial load
+            loadAquariums();
+            
+            // Auto-refresh every 5 seconds
+            updateInterval = setInterval(loadAquariums, 5000);
+        }
+        
+        function stopAutoRefresh() {
+            if (updateInterval) {
+                clearInterval(updateInterval);
+            }
+        }
+        
+        // Start auto-refresh when page loads
+        window.addEventListener('load', startAutoRefresh);
+        
+        // Stop auto-refresh when page is hidden
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                stopAutoRefresh();
+            } else {
+                startAutoRefresh();
+            }
+        });
+    </script>
+</body>
+</html>

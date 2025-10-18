@@ -53,6 +53,41 @@
 #define DEFAULT_PRINT_INTERVAL 5000     // 5 seconds between serial prints
 
 // ========================================
+// HTTPS/SSL Configuration
+// ========================================
+#define DEFAULT_HTTPS_PORT        443
+#define DEFAULT_HTTP_PORT         80
+#define DEFAULT_SSL_ENABLED       true
+
+// ========================================
+// Security Configuration  
+// ========================================
+#define DEFAULT_ADMIN_USERNAME    "admin"
+#define DEFAULT_ADMIN_PASSWORD    "admin"
+
+// ========================================
+// Aquarium Management Configuration
+// ========================================
+#define MAX_AQUARIUMS             8      // Maximum number of aquariums
+#define MAX_SENSORS_PER_TYPE      8      // Maximum sensors per type per aquarium
+#define MAX_AQUARIUM_NAME_LENGTH  32     // Maximum length for aquarium names
+
+// ========================================
+// Sensor Range Configuration
+// ========================================
+// Default temperature ranges (Celsius)
+#define DEFAULT_TEMP_MIN          20.0
+#define DEFAULT_TEMP_MAX          30.0
+
+// Default pH ranges  
+#define DEFAULT_PH_MIN            6.0
+#define DEFAULT_PH_MAX            8.0
+
+// Default TDS ranges (ppm)
+#define DEFAULT_TDS_MIN           50
+#define DEFAULT_TDS_MAX           500
+
+// ========================================
 // NO ICONS POLICY - CRITICAL CONFIGURATION
 // ========================================
 // This system NEVER uses emoji or Unicode icons due to:

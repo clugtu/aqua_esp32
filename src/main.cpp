@@ -94,7 +94,7 @@ void setup() {
 
   // Initialize web server
   Serial.println("Initializing Web Server...");
-  webServer.begin(&sensors, &calibrationMgr);
+  webServer.begin(&sensors, &calibrationMgr, &configMgr);
   Serial.println("Web Server started");
   Serial.println("Access dashboard at: http://" + network.getIP() + "/");
   Serial.println("API endpoint: http://" + network.getIP() + "/api/sensors");
